@@ -1,1 +1,7 @@
-raw_data/
+data/
+cache/
+frames/
+output/
+df_test.py
+**/.ipynb_checkpoints/
+.virtual_documents/

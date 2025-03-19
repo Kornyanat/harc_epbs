@@ -121,6 +121,3 @@ df = filter_time(df, start_time, minu)
 
 boxes = split_bounding_box(min_lat, max_lat, min_lon, max_lon, lat_divisions, lon_divisions)
 plot_boxes(boxes, df, freq_high, freq_low)
-
-
-
