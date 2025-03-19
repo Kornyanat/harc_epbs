@@ -46,9 +46,10 @@ def plot_boxes(boxes, df, output_folder, lat_divisions, lon_divisions):
         lons = df_box["mid_long"].to_numpy()
         times = df_box["date"].dt.epoch("s").to_numpy()
         distances = df_box["dist_Km"].to_numpy()
+        
 
         num_spots = len(df_box)
-        buffer = 1.1
+        buffer = 5
         ax_map.set_extent([box_min_lon - buffer, box_max_lon + buffer, 
                            box_min_lat - buffer, box_max_lat + buffer], crs=ccrs.PlateCarree())
 
@@ -64,7 +65,7 @@ def plot_boxes(boxes, df, output_folder, lat_divisions, lon_divisions):
         )
 
         if len(lats) > 0:
-            bins = 200
+            bins = 50
             heatmap, xedges, yedges = np.histogram2d(lons, lats, bins=bins, 
                                                      range=[[box_min_lon, box_max_lon], [box_min_lat, box_max_lat]])
             heatmap = np.log1p(heatmap)
@@ -74,12 +75,21 @@ def plot_boxes(boxes, df, output_folder, lat_divisions, lon_divisions):
                           origin='lower', cmap='inferno', alpha=0.7, aspect='auto')
         
         if len(times) > 0:
-            time_bins = 200
-            dist_bins = 200
-            heatmap_dist_time, time_edges, dist_edges = np.histogram2d(times, distances, 
-                                                                        bins=[time_bins, dist_bins])
-            ax_dist_time.imshow(heatmap_dist_time.T, origin='lower', aspect='auto', cmap='viridis', alpha=0.7,
-                                extent=[time_edges.min(), time_edges.max(), dist_edges.min(), dist_edges.max()])
+            time_bin_size = 120  # 2 minutes in seconds
+            dist_bin_size = 50  # 10 km
+            
+            # Manually define bin edges with fixed size
+            time_edges = np.arange(times.min(), times.max() + time_bin_size, time_bin_size)
+            dist_edges = np.arange(distances.min(), distances.max() + dist_bin_size, dist_bin_size)
+            
+            # Create the histogram using these bin edges
+            heatmap_dist_time, _, _ = np.histogram2d(times, distances, bins=[time_edges, dist_edges])
+            
+            # Continue with plotting
+            ax_dist_time.imshow(
+                heatmap_dist_time.T, origin='lower', aspect='auto', cmap='viridis', alpha=0.7,
+                extent=[time_edges[0], time_edges[-1], dist_edges[0], dist_edges[-1]]
+            )
             ax_dist_time.set_xlabel("Time (Unix Timestamp)", fontsize=10)
             ax_dist_time.set_ylabel("Distance (km)", fontsize=10)
             ax_dist_time.set_title(f"Distance vs Time (Box {idx+1})", fontsize=10)
@@ -105,6 +115,13 @@ output_folder = "output"
 
 df = pl.read_parquet("cache/df_gen/2017-07-01_lat-90_90_lon-180_180_1.00MHz_30.00MHz.parquet")
 df = df.with_columns(pl.col('date').cast(pl.Datetime))
+
+min_dist = 0  # Minimum distance in km
+max_dist = 3000  # Maximum distance in km
+df = df.filter(
+    (pl.col("dist_Km").cast(pl.Float64) >= min_dist) & 
+    (pl.col("dist_Km").cast(pl.Float64) <= max_dist)
+)
 
 boxes = split_bounding_box(min_lat, max_lat, min_lon, max_lon, lat_divisions, lon_divisions)
 
