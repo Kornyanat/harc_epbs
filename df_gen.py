@@ -4,6 +4,8 @@ import shutil
 import dask.dataframe as dd
 import polars as pl
 import pandas as pd
+from datetime import datetime
+import apexpy
 import logging
 from pathlib import Path
 from dask.diagnostics import ProgressBar
@@ -18,7 +20,9 @@ class HDF5PolarsLoader:
                  use_cache=True, 
                  region=None, 
                  freq_range=None, 
-                 chunk_size=10000):
+                 distance_range=None,
+                 chunk_size=10000,
+                 altitudes=None):  # altitudes passed in here
         """
         :param data_dir: Directory where the HDF5 files are stored.
         :param date_str: The date in the format 'YYYY-MM-DD' to construct the file name.
@@ -27,15 +31,17 @@ class HDF5PolarsLoader:
         :param region: Region filter for data, containing 'lat_lim' and 'lon_lim'.
         :param freq_range: Frequency range filter for data, containing 'min_freq' and 'max_freq'.
         :param chunk_size: Chunk size for reading the HDF5 file.
-        :param log: Custom logger to handle prints.
+        :param altitudes: List of altitudes to calculate geomagnetic coordinates.
         """
-        self.data_dir = Path(data_dir)
-        self.date_str = date_str
-        self.cache_dir = Path(cache_dir)
-        self.use_cache = use_cache
-        self.region = region
-        self.freq_range = freq_range
-        self.chunk_size = chunk_size
+        self.data_dir       = Path(data_dir)
+        self.date_str       = date_str
+        self.cache_dir      = Path(cache_dir)
+        self.use_cache      = use_cache
+        self.region         = region
+        self.freq_range     = freq_range
+        self.distance_range = distance_range
+        self.chunk_size     = chunk_size
+        self.altitudes      = altitudes or [300, 400, 500]  # Default altitudes if not provided
         
         if self.region:
             lat_min, lat_max = self.region['lat_lim']
@@ -80,12 +86,15 @@ class HDF5PolarsLoader:
         if self.freq_range:
             dask_df = dask_df.map_partitions(self.apply_freq_filter)
 
+        if self.distance_range:
+            dask_df = dask_df.map_partitions(self.apply_distance_filter)
+
         with ProgressBar():
             df = dask_df.compute()
 
         df['occurred'] = pd.to_datetime(df['year'] + '-' + df['month'] + '-' + df['day'] + ' ' + df['hour'] + ':' + df['min'] + ':' + df['sec'])
         df.drop(['year', 'month', 'day', 'hour', 'min', 'sec'], axis=1, inplace=True)
-        df["source"] = 1
+
         df = df.rename(columns={"pthlen": "dist_Km", 
                                 "rxlat": "rx_lat", 
                                 "rxlon": "rx_long", 
@@ -99,6 +108,9 @@ class HDF5PolarsLoader:
         df.rename(columns={"occurred": "date", "rx_lat": "mid_lat", "rx_long": "mid_long"}, inplace=True)
 
         df_polars = pl.from_pandas(df)
+
+        # Apply geomagnetic conversion with altitudes passed in
+        df_polars = convert_lat_lon_to_geomagnetic(df_polars, date_str=self.date_str, altitudes=self.altitudes)
 
         df_polars.write_parquet(self.cache_path, compression='snappy')
         self.df = df_polars
@@ -117,6 +129,13 @@ class HDF5PolarsLoader:
         if self.freq_range:
             min_freq, max_freq = self.freq_range['min_freq'], self.freq_range['max_freq']
             df = df[(df['tfreq'] >= min_freq) & (df['tfreq'] <= max_freq)]
+        return df
+
+    def apply_distance_filter(self, df):
+        """Apply the distance filter to the Dask DataFrame using the 'pthlen' column."""
+        if self.distance_range:
+            min_dist, max_dist = self.distance_range['min_dist'], self.distance_range['max_dist']
+            df = df[(df['pthlen'] >= min_dist) & (df['pthlen'] <= max_dist)]
         return df
 
     def get_band(self, frequency):
@@ -152,33 +171,67 @@ class HDF5PolarsLoader:
         else:
             self.log.info(f"Cache directory not found: {self.cache_dir}")
 
+
+def convert_lat_lon_to_geomagnetic(df: pl.DataFrame, date_str: str, altitudes: list) -> pl.DataFrame:
+    # Convert date string to decimal year
+    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+    decimal_year = date_obj.year + (date_obj.timetuple().tm_yday - 1) / 365.25
+    
+    # Initialize the Apex object with the decimal year
+    apex_out = apexpy.Apex(date=decimal_year)
+    
+    # Prepare to store results for each altitude
+    for alt in altitudes:
+        # Convert mid_lat and mid_long to geomagnetic coordinates for each altitude
+        geomagnetic_lat, geomagnetic_lon = apex_out.convert(df['mid_lat'].to_list(), df['mid_long'].to_list(), 'geo', 'apex', height=alt)
+        
+        # Add new columns for geomagnetic latitude and longitude
+        df = df.with_columns([
+            pl.Series(f'geomag_lat_{alt}', geomagnetic_lat),
+            pl.Series(f'geomag_lon_{alt}', geomagnetic_lon)
+        ])
+    
+    return df
+
 if __name__ == "__main__":
     # Example region and frequency range definitions
-
-        
-    
     region = {
         'lat_lim': [-90, 90],  # From South Pole to North Pole
         'lon_lim': [-180, 180]  # From West to East
     }
+    
     freq_range = {
-        'min_freq': 1000000,  # Example minimum frequency (1 MHz)
-        'max_freq': 30000000  # Example maximum frequency (30 MHz)
+        'min_freq': 6000000,  # Example minimum frequency (6 MHz)
+        'max_freq': 15000000  # Example maximum frequency (15 MHz)
     }
+
+    distance_range = {
+        'min_dist': 0,    # Example minimum distance in kilometers
+        'max_dist': 3000  # Example maximum distance in kilometers
+    }
+
+    # Define the altitudes for conversion
+    altitudes = [100,300]  # Altitudes in km
 
     # Define the date range you want to process (e.g., a list of dates)
     date_range = ["2017-07-01"]
 
     # Process each date
     for date_str in date_range:
-        loader = HDF5PolarsLoader(data_dir="data/madrigal", 
-                                  date_str=date_str, 
-                                  region=region, 
-                                  freq_range=freq_range, 
-                                  use_cache=True)
-        
-        # Get the dataframe (it will use the cache if available and `use_cache=True`)
-        df = loader.clear_cache()
-        df = loader.get_dataframe()
+        loader = HDF5PolarsLoader(
+            data_dir="data/madrigal", 
+            date_str=date_str, 
+            region=region, 
+            freq_range=freq_range,
+            distance_range=distance_range,
+            altitudes=altitudes,  # Altitudes passed here
+            use_cache=True
+        )
+
+        # Clear cache and load the dataframe (it will use the cache if available and `use_cache=True`)
+        loader.clear_cache()  # Clear cache first
+        df = loader.get_dataframe()  # Load the data
+
+        # Print the processed data
         print(f"Processed data for {date_str}:")
         print(df)

@@ -1,123 +1,128 @@
+#!/usr/bin/env python3
+
 import polars as pl
-import pandas as pd
 import matplotlib.pyplot as plt
-import os
-import datetime
-import matplotlib as mpl
-import matplotlib.gridspec as gridspec
-from matplotlib.patches import Rectangle
 import numpy as np
-import datetime
-import bz2
-import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+import os
+from scipy.ndimage import gaussian_filter
+import matplotlib.gridspec as gridspec
 
-def filter_df(df, min_lat, max_lat, min_lon, max_lon, freq_high, freq_low):
-
-  filtered_df = df[
-    (df[23] >= min_lat) &
-    (df[23] <= max_lat) &
-    (df[24] >= min_lon) &
-    (df[24] <= max_lon)
-  ]
-
-#  min_df = filtered_df[
-#    (filtered_df['freq'] <= freq_high) &
-#    (filtered_df['freq'] >= freq_low)
-#  ]
-
-  df = filtered_df[
-    (filtered_df[22] <= 1000)
-  ]
-
-  return df
-
-def filter_time(df, start_time, minu):
-
-  # Define the start time for the two-minute chunk
-  #start_time = pd.Timestamp('2017-11-03 18:00:00')
-
-  # Define the end time for the two-minute chunk
-  end_time = start_time + pd.Timedelta(minutes=minu)
-
-  # Select the data within the two-minute range
-  df = df[(df[0] >= start_time) & (df[0] < end_time)]
-
-  return df
+def geo_filter(df, min_lat, max_lat, min_lon, max_lon):
+    """Filters the DataFrame based on a given bounding box."""
+    return df.filter(
+        (pl.col("mid_lat").is_between(min_lat, max_lat)) &
+        (pl.col("mid_long").is_between(min_lon, max_lon))
+    )
 
 def split_bounding_box(min_lat, max_lat, min_lon, max_lon, lat_divisions, lon_divisions):
     lat_step = (max_lat - min_lat) / lat_divisions
     lon_step = (max_lon - min_lon) / lon_divisions
+    return [
+        (min_lat + i * lat_step, min_lat + (i + 1) * lat_step,
+         min_lon + j * lon_step, min_lon + (j + 1) * lon_step)
+        for i in range(lat_divisions) for j in range(lon_divisions)
+    ]
 
-    boxes = []
+def plot_boxes(boxes, df, output_folder, lat_divisions, lon_divisions):
+    fig = plt.figure(figsize=(20 * lon_divisions, 5 * lat_divisions))
+    gs = gridspec.GridSpec(lat_divisions, lon_divisions, figure=fig)
+    
+    for idx, box in enumerate(boxes):
+        box_min_lat, box_max_lat, box_min_lon, box_max_lon = box
+        row_idx = idx // lon_divisions
+        col_idx = idx % lon_divisions
 
-    for i in range(lat_divisions):
-        for j in range(lon_divisions):
-            box_min_lat = min_lat + i * lat_step
-            box_max_lat = min_lat + (i + 1) * lat_step
-            box_min_lon = min_lon + j * lon_step
-            box_max_lon = min_lon + (j + 1) * lon_step
+        # Create a grid for each subplot spot with 1 row and 2 columns
+        inner_gs = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[row_idx, col_idx], width_ratios=[1, 3])
+        
+        ax_map = fig.add_subplot(inner_gs[0], projection=ccrs.PlateCarree())
+        ax_dist_time = fig.add_subplot(inner_gs[1])
+        
+        df_box = geo_filter(df, box_min_lat, box_max_lat, box_min_lon, box_max_lon)
+        
+        lats = df_box["mid_lat"].to_numpy()
+        lons = df_box["mid_long"].to_numpy()
+        times = df_box["date"].dt.epoch("s").to_numpy()
+        distances = df_box["dist_Km"].to_numpy()
+        
 
-            boxes.append((box_min_lat, box_max_lat, box_min_lon, box_max_lon))
+        num_spots = len(df_box)
+        buffer = 5
+        ax_map.set_extent([box_min_lon - buffer, box_max_lon + buffer, 
+                           box_min_lat - buffer, box_max_lat + buffer], crs=ccrs.PlateCarree())
 
-    return boxes
+        ax_map.set_facecolor("black")
+        ax_map.add_feature(cfeature.COASTLINE, edgecolor="white")
+        ax_map.add_feature(cfeature.BORDERS, linestyle=":", edgecolor="white")
+        ax_map.add_feature(cfeature.STATES, linestyle=":", edgecolor="white")
 
-def plot_boxes(boxes, df, freq_high, freq_low):
+        ax_map.plot(
+            [box_min_lon, box_max_lon, box_max_lon, box_min_lon, box_min_lon],
+            [box_min_lat, box_min_lat, box_max_lat, box_max_lat, box_min_lat],
+            color="cyan", linewidth=2, transform=ccrs.PlateCarree()
+        )
 
+        if len(lats) > 0:
+            bins = 50
+            heatmap, xedges, yedges = np.histogram2d(lons, lats, bins=bins, 
+                                                     range=[[box_min_lon, box_max_lon], [box_min_lat, box_max_lat]])
+            heatmap = np.log1p(heatmap)
+            heatmap = gaussian_filter(heatmap, sigma=2)
 
-  # Create main grid of subplots using GridSpec
-  fig = plt.figure(figsize=(20 * lon_divisions, 5 * lat_divisions))
-  gs = gridspec.GridSpec(lat_divisions, lon_divisions)
+            ax_map.imshow(heatmap.T, extent=[box_min_lon, box_max_lon, box_min_lat, box_max_lat],
+                          origin='lower', cmap='inferno', alpha=0.7, aspect='auto')
+        
+        if len(times) > 0:
+            time_bin_size = 120  # 2 minutes in seconds
+            dist_bin_size = 50  # 10 km
+            
+            # Manually define bin edges with fixed size
+            time_edges = np.arange(times.min(), times.max() + time_bin_size, time_bin_size)
+            dist_edges = np.arange(distances.min(), distances.max() + dist_bin_size, dist_bin_size)
+            
+            # Create the histogram using these bin edges
+            heatmap_dist_time, _, _ = np.histogram2d(times, distances, bins=[time_edges, dist_edges])
+            
+            # Continue with plotting
+            ax_dist_time.imshow(
+                heatmap_dist_time.T, origin='lower', aspect='auto', cmap='viridis', alpha=0.7,
+                extent=[time_edges[0], time_edges[-1], dist_edges[0], dist_edges[-1]]
+            )
+            ax_dist_time.set_xlabel("Time (Unix Timestamp)", fontsize=10)
+            ax_dist_time.set_ylabel("Distance (km)", fontsize=10)
+            ax_dist_time.set_title(f"Distance vs Time (Box {idx+1})", fontsize=10)
 
-  for idx, box in enumerate(boxes):
-      box_min_lat, box_max_lat, box_min_lon, box_max_lon = box
-      row_idx = idx // lon_divisions
-      col_idx = idx % lon_divisions
+        ax_map.set_aspect('equal')
+        ax_map.tick_params(axis="both", colors="white")
+        ax_map.set_title(f'Box {idx+1}\nLat: ({box_min_lat:.2f}, {box_max_lat:.2f})\nLon: ({box_min_lon:.2f}, {box_max_lon:.2f})',
+                         fontsize=10)
+        ax_map.text(0.5, -0.1, f'Total Spots: {num_spots}', ha='center', va='center', 
+                    transform=ax_map.transAxes, fontsize=10)
+    
+    os.makedirs(output_folder, exist_ok=True)
+    output_file = os.path.join(output_folder, 'heatmap_and_dist_time.png')
+    plt.tight_layout()
+    plt.savefig(output_file, facecolor="white")
+    print(f"Plot saved to {output_file}")
+    plt.close()
+    
+min_lat, max_lat = 20, 55
+min_lon, max_lon = -130, -60
+lat_divisions, lon_divisions = 4, 4
+output_folder = "output"
 
-      # Create a grid for each subplot spot with 1 row and 2 columns
-      inner_gs = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[row_idx, col_idx], width_ratios=[1, 3])
+df = pl.read_parquet("cache/df_gen/2017-07-01_lat-90_90_lon-180_180_1.00MHz_30.00MHz.parquet")
+df = df.with_columns(pl.col('date').cast(pl.Datetime))
 
-      # Create the map plot on the left
-      ax_map = fig.add_subplot(inner_gs[0], projection=ccrs.PlateCarree())
-      ax_map.set_extent([min_lon, max_lon, min_lat, max_lat], crs=ccrs.PlateCarree())
-      ax_map.add_feature(cfeature.COASTLINE)
-      ax_map.add_feature(cfeature.BORDERS, linestyle=':')
-      ax_map.add_feature(cfeature.STATES, linestyle=':')
-      ax_map.plot([box_min_lon, box_max_lon, box_max_lon, box_min_lon, box_min_lon],
-                  [box_min_lat, box_min_lat, box_max_lat, box_max_lat, box_min_lat],
-                  color='red', transform=ccrs.PlateCarree())
-      ax_map.set_title(f'Box {idx+1}\nLat: ({box_min_lat:.2f}, {box_max_lat:.2f}), Lon: ({box_min_lon:.2f}, {box_max_lon:.2f})')
-
-      # Create the additional plot on the right
-
-      df_p = filter_df(df, box_min_lat, box_max_lat, box_min_lon, box_max_lon, freq_high, freq_low)
-
-      ax_additional = fig.add_subplot(inner_gs[1])
-      ax_additional.hist2d(df_p[0], df_p[22], bins = 400)
-      ax_additional.set_title('Additional Plot')
-      ax_additional.set_xlabel('Longitude')
-      ax_additional.set_ylabel('Latitude')
-
-  plt.tight_layout()
-  plt.show()
-
-min_lat = 20
-max_lat = 55
-min_lon = -130
-max_lon = -60
-lat_divisions = 4
-lon_divisions = 4
-freq_high  = 15000
-freq_low   = 13000
-minu = 30
-
-# Load the CSV file into a DataFrame
-df = pd.read_csv('2024-05-01_PSK_14.csv', header=None)
-df[0] = pd.to_datetime(df[0])
-
-start_time = pd.Timestamp('2024-05-01 00:30:00')
-df = filter_time(df, start_time, minu)
+min_dist = 0  # Minimum distance in km
+max_dist = 3000  # Maximum distance in km
+df = df.filter(
+    (pl.col("dist_Km").cast(pl.Float64) >= min_dist) & 
+    (pl.col("dist_Km").cast(pl.Float64) <= max_dist)
+)
 
 boxes = split_bounding_box(min_lat, max_lat, min_lon, max_lon, lat_divisions, lon_divisions)
-plot_boxes(boxes, df, freq_high, freq_low)
+
+plot_boxes(boxes, df, output_folder, lat_divisions, lon_divisions)
