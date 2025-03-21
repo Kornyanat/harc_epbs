@@ -56,12 +56,24 @@ class HDF5PolarsLoader:
             freq_str = f"{min_freq_mhz:.2f}MHz_{max_freq_mhz:.2f}MHz"
         else:
             freq_str = "full_freq_range"
-        
-        self.cache_path = self.cache_dir / f"{self.date_str}_{region_str}_{freq_str}.parquet"
+    
+        if self.distance_range:
+            min_dist = self.distance_range['min_dist']
+            max_dist = self.distance_range['max_dist']
+            distance_str = f"dist{min_dist}_{max_dist}km"
+        else:
+            distance_str = "full_distance_range"
+    
+        # Construct altitude-specific string
+        altitudes_str = '_'.join([str(alt) for alt in self.altitudes])
+    
+        # Update the cache path to include distance and altitudes
+        self.cache_path = self.cache_dir / f"{self.date_str}_{region_str}_{freq_str}_{distance_str}_altitudes_{altitudes_str}.parquet"
         self.df = None
         self.log = logging.getLogger(__name__)
-
+    
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+
 
     def get_file_path(self):
         """Construct the file path based on the date string."""
@@ -69,7 +81,7 @@ class HDF5PolarsLoader:
         return self.data_dir / file_name
 
     def load_data(self):
-        """Load the dataset from cache or process the HDF5 file using Dask."""
+        """Load the dataset from cache or process the HDF5 file using Dask and convert to polars df."""
         if self.use_cache and self.cache_path.exists():
             self.log.info(f"Loading data from cache for {self.date_str}...")
             self.df = pl.read_parquet(self.cache_path)
@@ -196,8 +208,8 @@ def convert_lat_lon_to_geomagnetic(df: pl.DataFrame, date_str: str, altitudes: l
 if __name__ == "__main__":
     # Example region and frequency range definitions
     region = {
-        'lat_lim': [-90, 90],  # From South Pole to North Pole
-        'lon_lim': [-180, 180]  # From West to East
+        'lat_lim': [-30, 30],  # Latitude range: 30ºN to 30ºS
+        'lon_lim': [-100, -30]  # Longitude range: 30ºW to 100ºW
     }
     
     freq_range = {
