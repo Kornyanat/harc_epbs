@@ -42,7 +42,8 @@ class HDF5PolarsLoader:
         self.distance_range = distance_range
         self.chunk_size     = chunk_size
         self.altitudes      = altitudes or [300, 400, 500]  # Default altitudes if not provided
-        
+
+        # Construct dynamic cache path
         if self.region:
             lat_min, lat_max = self.region['lat_lim']
             lon_min, lon_max = self.region['lon_lim']
@@ -64,10 +65,9 @@ class HDF5PolarsLoader:
         else:
             distance_str = "full_distance_range"
     
-        # Construct altitude-specific string
         altitudes_str = '_'.join([str(alt) for alt in self.altitudes])
     
-        # Update the cache path to include distance and altitudes
+        # cache path
         self.cache_path = self.cache_dir / f"{self.date_str}_{region_str}_{freq_str}_{distance_str}_altitudes_{altitudes_str}.parquet"
         self.df = None
         self.log = logging.getLogger(__name__)
@@ -88,52 +88,75 @@ class HDF5PolarsLoader:
             return self.df
 
         file_path = self.get_file_path()
-
-        self.log.info(f"Loading data from HDF5 file {file_path}...")
-        dask_df = dd.read_hdf(file_path, key="Data/Table Layout", chunksize=self.chunk_size)
+        self.log.info(f"Loading data from HDF5 file {file_path}...")        
         
+        # Load only the required columns from the HDF5 file
+        dask_df = dd.read_hdf(file_path, key="Data/Table Layout", chunksize=self.chunk_size)
+
+        required_columns = ['year', 'month', 'day', 'hour', 'min', 'sec', 'pthlen', 'rxlat', 'rxlon', 'txlat', 'txlon', 'tfreq', 'latcen', 'loncen', 'ssrc']
+        dask_df = dask_df[required_columns]
+        
+        # Downcast columns to lower precision where appropriate
+        dask_df = dask_df.astype({
+            'rxlat': 'float32',  # Downcast latitude to float32
+            'rxlon': 'float32',  # Downcast longitude to float32
+            'txlat': 'float32',  # Downcast latitude to float32
+            'txlon': 'float32',  # Downcast longitude to float32
+            'latcen': 'float32',
+            'loncen': 'float32',
+            'ssrc': 'category',
+            'tfreq': 'float32',  # Downcast frequency to float32
+            'pthlen': 'int32'    # Downcast distance to int32 (as you're only interested in distances under 8000 km)
+        })
+        
+        # Apply filters to the data (if any) before proceeding with the rest of the steps
         if self.region:
             dask_df = dask_df.map_partitions(self.apply_region_filter)
-
         if self.freq_range:
             dask_df = dask_df.map_partitions(self.apply_freq_filter)
-
         if self.distance_range:
             dask_df = dask_df.map_partitions(self.apply_distance_filter)
-
+        
+        # Continue processing and converting to pandas (or directly to Polars)
         with ProgressBar():
             df = dask_df.compute()
-
+        
+        # Renaming and processing the dataframe as before
         df['occurred'] = pd.to_datetime(df['year'] + '-' + df['month'] + '-' + df['day'] + ' ' + df['hour'] + ':' + df['min'] + ':' + df['sec'])
         df.drop(['year', 'month', 'day', 'hour', 'min', 'sec'], axis=1, inplace=True)
-
-        df = df.rename(columns={"pthlen": "dist_Km", 
+        
+        df = df.rename(columns={"occurred": "date",
+                                "pthlen": "dist_Km", 
                                 "rxlat": "rx_lat", 
                                 "rxlon": "rx_long", 
                                 "txlat": "tx_lat", 
                                 "txlon": "tx_long",
                                 "tfreq": "freq",
-                                })
-        df['band'] = df['freq'].apply(self.get_band)
+                                "ssrc": "source",
+                                "latcen": "mid_lat",
+                                "loncen": "mid_long"})
 
-        df = df[['freq', 'band', 'occurred', 'rx_lat', 'rx_long', 'dist_Km']]
-        df.rename(columns={"occurred": "date", "rx_lat": "mid_lat", "rx_long": "mid_long"}, inplace=True)
-
+        df['band'] = df['freq'].apply(self.get_band).astype('int8')
+        
+        df = df[['date', 'freq', 'band', 'dist_Km', 'source', 'mid_lat', 'mid_long', 'rx_lat', 'tx_lat', 'rx_long', 'tx_long']]
+        
+        # Convert to Polars
         df_polars = pl.from_pandas(df)
-
-        # Apply geomagnetic conversion with altitudes passed in
+        
+        # Apply geomagnetic conversion
         df_polars = convert_lat_lon_to_geomagnetic(df_polars, date_str=self.date_str, altitudes=self.altitudes)
-
+        
+        # Save to cache
         df_polars.write_parquet(self.cache_path, compression='snappy')
         self.df = df_polars
         return self.df
 
     def apply_region_filter(self, df):
-        """Apply the region filter to the Dask DataFrame using the original HDF5 columns."""
+        """Apply the region filter to the Dask DataFrame using the midpoint lat/lon columns."""
         if self.region:
             lat_lim, lon_lim = self.region['lat_lim'], self.region['lon_lim']
-            df = df[(df['rxlat'] >= lat_lim[0]) & (df['rxlat'] < lat_lim[1])]
-            df = df[(df['rxlon'] >= lon_lim[0]) & (df['rxlon'] < lon_lim[1])]
+            df = df[(df['latcen'] >= lat_lim[0]) & (df['latcen'] < lat_lim[1])]
+            df = df[(df['loncen'] >= lon_lim[0]) & (df['loncen'] < lon_lim[1])]
         return df
 
     def apply_freq_filter(self, df):
@@ -199,18 +222,24 @@ def convert_lat_lon_to_geomagnetic(df: pl.DataFrame, date_str: str, altitudes: l
         
         # Add new columns for geomagnetic latitude and longitude
         df = df.with_columns([
-            pl.Series(f'geomag_lat_{alt}', geomagnetic_lat),
-            pl.Series(f'geomag_lon_{alt}', geomagnetic_lon)
+            pl.Series(f'geomag_lat_{alt}', geomagnetic_lat).cast(pl.Float32),
+            pl.Series(f'geomag_lon_{alt}', geomagnetic_lon).cast(pl.Float32)
         ])
     
     return df
 
 if __name__ == "__main__":
+    
     # Example region and frequency range definitions
     region = {
         'lat_lim': [-30, 30],  # Latitude range: 30ºN to 30ºS
         'lon_lim': [-100, -30]  # Longitude range: 30ºW to 100ºW
     }
+
+#    region = {
+#    'lat_lim': [-90, 90],  # Latitude range: -90º (South Pole) to 90º (North Pole)
+#    'lon_lim': [-180, 180]  # Longitude range: 180ºW to 180ºE (entire globe)
+#    }
     
     freq_range = {
         'min_freq': 6000000,  # Example minimum frequency (6 MHz)
