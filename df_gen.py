@@ -14,15 +14,15 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class HDF5PolarsLoader:
     def __init__(self, 
-                 data_dir, 
-                 date_str, 
-                 cache_dir="cache/df_gen", 
-                 use_cache=True, 
-                 region=None, 
-                 freq_range=None, 
-                 distance_range=None,
-                 chunk_size=10000,
-                 altitudes=None):  # altitudes passed in here
+                 data_dir: str, 
+                 date_str: str, 
+                 cache_dir: str = "cache/df_gen", 
+                 use_cache: bool = True, 
+                 region: tuple = None, 
+                 freq_range: tuple = None, 
+                 distance_range: tuple = None, 
+                 chunk_size: int = 10000, 
+                 altitudes: list = None):
         """
         :param data_dir: Directory where the HDF5 files are stored.
         :param date_str: The date in the format 'YYYY-MM-DD' to construct the file name.
