@@ -9,6 +9,7 @@ import apexpy
 import logging
 from pathlib import Path
 from dask.diagnostics import ProgressBar
+from utils import *
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -16,7 +17,7 @@ class HDF5PolarsLoader:
     def __init__(self, 
                  data_dir: str, 
                  date_str: str, 
-                 cache_dir: str = "cache/df_gen", 
+                 cache_dir: str = "../cache/df_gen", 
                  use_cache: bool = True, 
                  region: tuple = None, 
                  freq_range: tuple = None, 
@@ -144,7 +145,7 @@ class HDF5PolarsLoader:
         df_polars = pl.from_pandas(df)
         
         # Apply geomagnetic conversion
-        df_polars = convert_lat_lon_to_geomagnetic(df_polars, date_str=self.date_str, altitudes=self.altitudes)
+        df_polars = add_geomagnetic_columns(df_polars, date_str=self.date_str, altitudes=self.altitudes)
         
         # Save to cache
         df_polars.write_parquet(self.cache_path, compression='snappy')
@@ -207,27 +208,6 @@ class HDF5PolarsLoader:
             self.log.info(f"Cache directory not found: {self.cache_dir}")
 
 
-def convert_lat_lon_to_geomagnetic(df: pl.DataFrame, date_str: str, altitudes: list) -> pl.DataFrame:
-    # Convert date string to decimal year
-    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-    decimal_year = date_obj.year + (date_obj.timetuple().tm_yday - 1) / 365.25
-    
-    # Initialize the Apex object with the decimal year
-    apex_out = apexpy.Apex(date=decimal_year)
-    
-    # Prepare to store results for each altitude
-    for alt in altitudes:
-        # Convert mid_lat and mid_long to geomagnetic coordinates for each altitude
-        geomagnetic_lat, geomagnetic_lon = apex_out.convert(df['mid_lat'].to_list(), df['mid_long'].to_list(), 'geo', 'apex', height=alt)
-        
-        # Add new columns for geomagnetic latitude and longitude
-        df = df.with_columns([
-            pl.Series(f'geomag_lat_{alt}', geomagnetic_lat).cast(pl.Float32),
-            pl.Series(f'geomag_lon_{alt}', geomagnetic_lon).cast(pl.Float32)
-        ])
-    
-    return df
-
 if __name__ == "__main__":
     
     # Example region and frequency range definitions
@@ -260,7 +240,7 @@ if __name__ == "__main__":
     # Process each date
     for date_str in date_range:
         loader = HDF5PolarsLoader(
-            data_dir="data/madrigal", 
+            data_dir="../data/madrigal", 
             date_str=date_str, 
             region=region, 
             freq_range=freq_range,
