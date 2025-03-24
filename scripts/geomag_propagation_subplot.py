@@ -71,7 +71,7 @@ class GeoMagPlotter:
             
             ax.imshow(heatmap.T, extent=[lon_min, lon_max, lat_min, lat_max],
                       origin='lower', cmap='inferno', alpha=0.7, aspect='auto')
-        ax.set_title(f'Magnetic Coordinates at {self.altitude} km Altitude', fontsize=12)
+        ax.set_title(f'Spot Midpoint Locations (Geocentric Coordinates)', fontsize=12)
         
     def create_dist_lon_subplot(self, ax):
         """Create distance vs. time subplot with a log-scale colormap, with zero values in custom color."""
