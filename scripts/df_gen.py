@@ -22,7 +22,7 @@ class HDF5PolarsLoader:
                  region: tuple = None, 
                  freq_range: tuple = None, 
                  distance_range: tuple = None, 
-                 chunk_size: int = 10000, 
+                 chunk_size: int = 100000, 
                  altitudes: list = None):
         """
         :param data_dir: Directory where the HDF5 files are stored.
@@ -94,7 +94,22 @@ class HDF5PolarsLoader:
         # Load only the required columns from the HDF5 file
         dask_df = dd.read_hdf(file_path, key="Data/Table Layout", chunksize=self.chunk_size)
 
-        required_columns = ['year', 'month', 'day', 'hour', 'min', 'sec', 'pthlen', 'rxlat', 'rxlon', 'txlat', 'txlon', 'tfreq', 'latcen', 'loncen', 'ssrc']
+        required_columns = ['year', 
+                            'month', 
+                            'day', 
+                            'hour', 
+                            'min', 
+                            'sec', 
+                            'pthlen', 
+                            'rxlat', 
+                            'rxlon', 
+                            'txlat', 
+                            'txlon', 
+                            'tfreq', 
+                            'latcen', 
+                            'loncen', 
+                            'ssrc']
+        
         dask_df = dask_df[required_columns]
         
         # Downcast columns to lower precision where appropriate
@@ -137,6 +152,7 @@ class HDF5PolarsLoader:
                                 "latcen": "mid_lat",
                                 "loncen": "mid_long"})
 
+        #move to polars df
         df['band'] = df['freq'].apply(self.get_band).astype('int8')
         
         df = df[['date', 'freq', 'band', 'dist_Km', 'source', 'mid_lat', 'mid_long', 'rx_lat', 'tx_lat', 'rx_long', 'tx_long']]
@@ -211,15 +227,15 @@ class HDF5PolarsLoader:
 if __name__ == "__main__":
     
     # Example region and frequency range definitions
-    region = {
-        'lat_lim': [-30, 30],  # Latitude range: 30ºN to 30ºS
-        'lon_lim': [-100, -30]  # Longitude range: 30ºW to 100ºW
-    }
-
 #    region = {
-#    'lat_lim': [-90, 90],  # Latitude range: -90º (South Pole) to 90º (North Pole)
-#    'lon_lim': [-180, 180]  # Longitude range: 180ºW to 180ºE (entire globe)
+#        'lat_lim': [-30, 30],  # Latitude range: 30ºN to 30ºS
+#        'lon_lim': [-100, -30]  # Longitude range: 30ºW to 100ºW
 #    }
+
+    region = {
+    'lat_lim': [-90, 90],  # Latitude range: -90º (South Pole) to 90º (North Pole)
+    'lon_lim': [-180, 180]  # Longitude range: 180ºW to 180ºE (entire globe)
+    }
     
     freq_range = {
         'min_freq': 6000000,  # Example minimum frequency (6 MHz)
