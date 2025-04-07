@@ -10,7 +10,8 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import os
 from scipy.ndimage import gaussian_filter
-from utils import *
+from utils_geo import *
+from utils_plot import *
 
 class GeoMagPlotter:
     def __init__(self, 
@@ -33,7 +34,7 @@ class GeoMagPlotter:
     
     def mag_filter(self):
         """Filters the DataFrame based on given latitude and longitude."""
-        lat, lon = convert_geocentric_to_geomagnetic(self.region['lat_lim'], self.region['lon_lim'], altitude, date_str='2017-07-01')
+        lat, lon = convert_geocentric_to_geomagnetic(self.region['lat_lim'], self.region['lon_lim'], self.altitude, date_str='2017-07-01')
 
         mag_region = {
             'lat_lim': lat,  
@@ -156,39 +157,35 @@ class GeoMagPlotter:
     
     def plot(self):
         """Generate the combined plot."""
-        fig = plt.figure(figsize=(16, 10))  # Larger figure size for better spacing
-    
-        # Create GridSpec with equal height ratios, adding an extra column for the colorbar
+        fig = plt.figure(figsize=(16, 10))
         gs = gridspec.GridSpec(2, 3, width_ratios=[1, 2, 0.05], height_ratios=[1, 1])
     
-        # Create subplots
-        ax_map = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())  # Left column
-        ax_dist_time = fig.add_subplot(gs[0, 1])  # Top-right plot
-        ax_new = fig.add_subplot(gs[1, 1])  # Bottom-right plot
-        ax_textbox = fig.add_subplot(gs[0, 0])  # Top-left text box
-        ax_colorbar = fig.add_subplot(gs[0, 2])  # Colorbar spans all rows in the last column
+        ax_map = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
+        ax_dist_time = fig.add_subplot(gs[0, 1])
+        ax_spot = fig.add_subplot(gs[1, 1])
+        ax_text = fig.add_subplot(gs[0, 0])
+        ax_colorbar = fig.add_subplot(gs[0, 2])
     
-        # Create the plots
-        self.create_map_subplot(ax_map)  # Plot the first map
-        self.img = self.create_dist_lon_subplot(ax_dist_time)  # Distance vs. geomagnetic longitude
-        self.create_spot_count_subplot(ax_new)  # Spot count plot
-        self.create_text_box_subplot(ax_textbox)  # Text box
+        # Filtered data
+        df_geo = self.geo_filter()
+        df_mag = self.mag_filter()
     
-        # Add colorbar in its own subplot
-        cbar = plt.colorbar(self.img, cax=ax_colorbar, orientation='vertical')
-        cbar.set_label("Spot Count (Log Density)", fontsize=10)
+        plot_map(ax_map, df_geo, self.region)
+        self.img = plot_dist_vs_lon(ax_dist_time, df_mag, self.altitude)
+        plot_spot_count(ax_spot, df_mag, self.altitude)
+        plot_text_box(ax_text, self.df)
     
-        # Adjust layout: Use `tight_layout` and explicitly control spacing
-        plt.subplots_adjust(wspace=0.3, hspace=0.3)  # Adjust spaces between subplots
+        if self.img is not None:
+            cbar = plt.colorbar(self.img, cax=ax_colorbar, orientation='vertical')
+            cbar.set_label("Spot Count (Log Density)", fontsize=10)
     
-        # Save the plot
+        plt.subplots_adjust(wspace=0.3, hspace=0.3)
         os.makedirs(self.output_folder, exist_ok=True)
         output_file = os.path.join(self.output_folder, f"geo_plot_{self.altitude}km.png")
         plt.savefig(output_file, facecolor="white")
         plt.close()
-    
         print(f"Plot saved to {output_file}")
-    
+
 
 
 if __name__ == "__main__":

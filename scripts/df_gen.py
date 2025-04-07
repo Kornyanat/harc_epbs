@@ -9,7 +9,7 @@ import apexpy
 import logging
 from pathlib import Path
 from dask.diagnostics import ProgressBar
-from utils import *
+from utils_geo import *
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -227,15 +227,15 @@ class HDF5PolarsLoader:
 if __name__ == "__main__":
     
     # Example region and frequency range definitions
-#    region = {
-#        'lat_lim': [-30, 30],  # Latitude range: 30ºN to 30ºS
-#        'lon_lim': [-100, -30]  # Longitude range: 30ºW to 100ºW
-#    }
-
     region = {
-    'lat_lim': [-90, 90],  # Latitude range: -90º (South Pole) to 90º (North Pole)
-    'lon_lim': [-180, 180]  # Longitude range: 180ºW to 180ºE (entire globe)
+        'lat_lim': [-30, 30],  # Latitude range: 30ºN to 30ºS
+        'lon_lim': [-100, -30]  # Longitude range: 30ºW to 100ºW
     }
+
+#    region = {
+#    'lat_lim': [-90, 90],  # Latitude range: -90º (South Pole) to 90º (North Pole)
+#    'lon_lim': [-180, 180]  # Longitude range: 180ºW to 180ºE (entire globe)
+#    }
     
     freq_range = {
         'min_freq': 6000000,  # Example minimum frequency (6 MHz)
