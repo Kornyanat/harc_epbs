@@ -238,13 +238,13 @@ if __name__ == "__main__":
 #    }
     
     freq_range = {
-        'min_freq': 6000000,  # Example minimum frequency (6 MHz)
-        'max_freq': 15000000  # Example maximum frequency (15 MHz)
+        'min_freq': 0,  # Example minimum frequency (0 MHz)
+        'max_freq': 30000000  # Example maximum frequency (30 MHz)
     }
 
     distance_range = {
         'min_dist': 0,    # Example minimum distance in kilometers
-        'max_dist': 3000  # Example maximum distance in kilometers
+        'max_dist': 20000  # Example maximum distance in kilometers
     }
 
     # Define the altitudes for conversion

@@ -102,9 +102,9 @@ def plot_text_box(ax, df: pl.DataFrame, date_col: str = "date") -> None:
     ax.axis("off")
 
 
-def plot_globe(ax, df, region, altitude=0, date_str='2017-03-01'):
+def plot_globe(ax, df, region, date_str):
     """Plot the globe with specific lat/lon points, a red dotted line, and overlay the map on top."""
-    
+    altitude=0
     # Plot the globe first
     # Plot a red dotted line along the equator (0° latitude)
     geomag_lons = np.linspace(-180, 180, 360)
@@ -119,9 +119,18 @@ def plot_globe(ax, df, region, altitude=0, date_str='2017-03-01'):
             transform=ccrs.Geodetic())
 
     # Add gridlines and coastlines with orange landmass lines
-    gl = ax.gridlines(draw_labels=False, color='gray', linewidth=0.5, linestyle='--')
+    gl = ax.gridlines(draw_labels=True, color='gray', linewidth=0.5, linestyle='--')
     gl.xlocator = plt.MultipleLocator(30)  # Longitude lines every 30°
     gl.ylocator = plt.MultipleLocator(15)
+    gl.xlabel_style = {'size': 10, 'color': 'black'}
+    gl.ylabel_style = {'size': 10, 'color': 'black'}
+    
+    # Modify the label positioning (move the labels inside the globe)
+    gl.xlabels_top = False  # Hide the top labels
+    gl.xlabels_bottom = True  # Show labels only at the bottom
+    gl.ylabels_left = True  # Show labels on the left
+    gl.ylabels_right = False  # Hide the right labels
+    
     ax.coastlines(resolution='50m', color='blue', linewidth=1.5,alpha=0.5)
 
     # Show the whole globe (no extent set, so it's fully visible)
@@ -154,12 +163,47 @@ def plot_globe(ax, df, region, altitude=0, date_str='2017-03-01'):
         ax.imshow(heatmap.T * mask.T, extent=[lon_min, lon_max, lat_min, lat_max],
                   origin='lower', cmap='inferno', alpha=1.0, aspect='auto', transform=ccrs.PlateCarree())
 
-    ax.set_title(f"{date_str}", fontsize=20, fontweight='bold')
+    ax.set_title('Spot Midpoints (Geographic Coordinates)', fontsize=14)
+
+def plot_map_geomag(ax, df_box: pl.DataFrame, region: dict, alt: float, date_str: str) -> None:
+    """Plot the map heatmap of midpoints in geomagnetic coordinates."""
+    latlim, lonlim = convert_geocentric_to_geomagnetic(region['lat_lim'], region['lon_lim'], alt, date_str)
+    lat_min, lat_max = latlim
+    lon_min, lon_max = lonlim
+
+    lats = df_box[f"geomag_lat_{alt}"].to_numpy()
+    lons = df_box[f"geomag_lon_{alt}"].to_numpy()
+
+#    lat_min = min(latlim[0], lats.min())
+#    lat_max = max(latlim[1], lats.max())
+#    lon_min = min(lonlim[0], lons.min())
+#    lon_max = max(lonlim[1], lons.max())
+
+    if len(lats) > 0:
+        bins = 100
+        heatmap, xedges, yedges = np.histogram2d(lons, lats, bins=bins,
+                                                 range=[[lon_min, lon_max], [lat_min, lat_max]])
+
+        # Mask zeros to show them as black
+        heatmap = gaussian_filter(heatmap, sigma=2)
+        heatmap_masked = np.ma.masked_where(heatmap == 0, np.log1p(heatmap) * 3)
+#        heatmap_masked = np.ma.masked_where(heatmap == 0, np.log1p(heatmap))
+
+        # Create custom colormap
+        cmap = plt.cm.inferno.copy()
+        cmap.set_bad(color='black')  # Set masked values (0s) to black
+
+        ax.imshow(heatmap_masked.T, extent=[lon_min, lon_max, lat_min, lat_max],
+                  origin='lower', cmap=cmap, alpha=1, aspect='auto')
+
+    ax.set_title('Spot Midpoints (Geomagnetic Coordinates)', fontsize=14)
+    ax.set_xlabel('Longitude (°)', fontsize=12)
+    ax.set_ylabel('Latitude (°)', fontsize=12)
     
 # Example usage for testing purposes:
 if __name__ == "__main__":
     # Read the DataFrame
-    df = pl.read_parquet("../cache/df_gen/2017-07-01_lat-30_30_lon-100_-30_6.00MHz_15.00MHz_dist0_3000km_altitudes_100_300.parquet")
+    df = pl.read_parquet("../cache/df_gen/2017-07-01_lat-30_30_lon-100_-30_0.00MHz_30.00MHz_dist0_20000km_altitudes_100_300.parquet")
 
     # Define region and altitude for plotting
     region = {
@@ -204,8 +248,13 @@ if __name__ == "__main__":
         central_longitude=-60, central_latitude=0)})
     
     # Call the plot_globe function
-    plot_globe(ax5, df, region)
+    plot_globe(ax5, df, region, date_str='2017-03-01')
     
     # Save the plot
     fig5.savefig(f"{test_plots_folder}/plot_globe.png")
     print(f"Saved plot_globe.png")
+
+    fig6, ax6 = plt.subplots(figsize=(8, 6))
+    plot_map_geomag(ax6, df, region, altitude, date_str='2017-07-01')
+    fig6.savefig(f"{test_plots_folder}/plot_map_geomag.png")
+    print(f"Saved plot_map_geomag.png")

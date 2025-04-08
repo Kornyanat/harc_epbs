@@ -20,142 +20,34 @@ class GeoMagPlotter:
                  altitude: float = 300, 
                  output_folder: str = '..?/output'):
         
-        self.df = df
-        self.region = region
-        self.altitude = altitude
+        self.df            = df
+        self.region        = region
+        self.altitude      = altitude
         self.output_folder = output_folder
+        self.date_str      = self.df['date'].dt.strftime('%Y-%m-%d')[0]
 
-    def geo_filter(self):
-        """Filters the DataFrame based on given latitude and longitude."""
-        return self.df.filter(
-            (pl.col('mid_lat').is_between(*self.region['lat_lim'])) &
-            (pl.col('mid_long').is_between(*self.region['lon_lim']))
-        )
+#    def geo_filter(self):
+#        """Filters the DataFrame based on given latitude and longitude."""
+#        return self.df.filter(
+#            (pl.col('mid_lat').is_between(*self.region['lat_lim'])) &
+#            (pl.col('mid_long').is_between(*self.region['lon_lim']))
+#        )
     
-    def mag_filter(self):
-        """Filters the DataFrame based on given latitude and longitude."""
-        lat, lon = convert_geocentric_to_geomagnetic(self.region['lat_lim'], self.region['lon_lim'], self.altitude, date_str='2017-07-01')
+#    def mag_filter(self):
+#        """Filters the DataFrame based on given latitude and longitude."""
+#        lat, lon = convert_geocentric_to_geomagnetic(self.region['lat_lim'], self.region['lon_lim'], self.altitude, date_str='2017-07-01')
 
-        mag_region = {
-            'lat_lim': lat,  
-            'lon_lim': lon  
-        }
+#        mag_region = {
+#            'lat_lim': lat,  
+#            'lon_lim': lon  
+#        }
         
-        return self.df.filter(
-            (pl.col(f"geomag_lat_{self.altitude}").is_between(*mag_region['lat_lim'])) &
-            (pl.col(f"geomag_lon_{self.altitude}").is_between(*mag_region['lon_lim']))
-        )
-
-    def create_map_subplot(self, ax):
-        """Create map subplot."""
-        lat_min, lat_max = self.region['lat_lim']
-        lon_min, lon_max = self.region['lon_lim']
-
-        ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
-        ax.set_facecolor("black")
-        ax.add_feature(cfeature.COASTLINE, edgecolor="white")
-        ax.add_feature(cfeature.BORDERS, linestyle=":", edgecolor="white")
-        ax.add_feature(cfeature.STATES, linestyle=":", edgecolor="white")
-
-        # Filter data based on coordinates
-        df_box = self.geo_filter()
-        lats = df_box['mid_lat'].to_numpy()
-        lons = df_box['mid_long'].to_numpy()
-
-        if len(lats) > 0:
-            bins = 100
-            heatmap, xedges, yedges = np.histogram2d(lons, lats, bins=bins, 
-                                                     range=[[lon_min, lon_max], [lat_min, lat_max]])
-            
-            heatmap = np.log1p(heatmap)
-            heatmap = gaussian_filter(heatmap, sigma=2)
-            
-            ax.imshow(heatmap.T, extent=[lon_min, lon_max, lat_min, lat_max],
-                      origin='lower', cmap='inferno', alpha=0.7, aspect='auto')
-        ax.set_title(f'Spot Midpoint Locations (Geocentric Coordinates)', fontsize=12)
-        
-    def create_dist_lon_subplot(self, ax):
-        """Create distance vs. time subplot with a log-scale colormap, with zero values in custom color."""
-        df_box = self.mag_filter()
-        times = df_box[f"geomag_lon_{self.altitude}"].to_numpy()
-        distances = df_box["dist_Km"].to_numpy()
+#        return self.df.filter(
+#            (pl.col(f"geomag_lat_{self.altitude}").is_between(*mag_region['lat_lim'])) &
+#            (pl.col(f"geomag_lon_{self.altitude}").is_between(*mag_region['lon_lim']))
+#        )
     
-        if len(times) > 0:
-            time_bin_size = 1  
-            dist_bin_size = 50   
-    
-            # Define bin edges
-            time_edges = np.arange(times.min(), times.max() + time_bin_size, time_bin_size)
-            dist_edges = np.arange(distances.min(), distances.max() + dist_bin_size, dist_bin_size)
-    
-            # Compute 2D histogram
-            heatmap_dist_time, _, _ = np.histogram2d(times, distances, bins=[time_edges, dist_edges])
-    
-            # Normalize the colormap with log scaling
-            norm = LogNorm(vmin=np.nanmin(heatmap_dist_time[heatmap_dist_time > 0]), vmax=np.nanmax(heatmap_dist_time))
-    
-            # Create a colormap where zeros are represented by a specific color
-            cmap = cm.viridis  # Use the 'viridis' colormap
-            cmap.set_bad(color='black')  # Set zero/empty values to black or any color you prefer
-    
-            # Plot the heatmap
-            img = ax.imshow(
-                heatmap_dist_time.T, origin='lower', aspect='auto', cmap=cmap, alpha=0.7,
-                norm=norm, extent=[time_edges[0], time_edges[-1], dist_edges[0], dist_edges[-1]]
-            )
-    
-    
-            # Labels and title
-            ax.set_xlabel("Geomagnetic Longitude", fontsize=10)
-            ax.set_ylabel("Distance (km)", fontsize=10)
-            ax.set_title("Distance vs Geomagnetic Longtitude (Log Scale)", fontsize=12)
-
-        return img
-
-    def create_spot_count_subplot(self, ax):
-        """Create 2D plot for geomagnetic longitude vs. total spot counts."""
-        # Filter data based on geomagnetic region
-        df_box = self.mag_filter()
-    
-        # Get geomagnetic longitude at the given altitude
-        lons = df_box[f"geomag_lon_{self.altitude}"].to_numpy()
-    
-        # Define the bin edges for geomagnetic longitude (adjust as needed)
-        lon_bins = np.linspace(lons.min(), lons.max(), 50)  # 50 bins
-    
-        # Create histogram (count spots in each bin)
-        spot_counts, _ = np.histogram(lons, bins=lon_bins)
-    
-        # Plotting the geomagnetic longitude vs. total spot counts
-        ax.plot(lon_bins[:-1], spot_counts, marker="o", linestyle='-', color='tab:blue')  # Plot excluding last bin edge
-        ax.set_xlabel("Geomagnetic Longitude", fontsize=10)
-        ax.set_ylabel("Total Spot Count", fontsize=10)
-        ax.set_title(f"Geomagnetic Longitude vs. Total Spot Counts at {self.altitude} km Altitude", fontsize=12)
-
-    def create_text_box_subplot(self, ax):
-        """Create a text box subplot with date and data source percentages."""
-        df_box = self.df  # Use the entire dataset
-    
-        # Extract the date (assuming it's the same for all rows)
-        date_str = df_box["date"][0].strftime("%Y-%m-%d") if len(df_box) > 0 else "No Data"
-    
-        percentages = calculate_source_percent(df_box)
-        spot_count  = df_box.height
-        
-        text_lines  = [f"Date: {date_str}"]
-        text_lines.append(f"Spot count: {spot_count}")
-        for source, percent in percentages.items():
-            text_lines.append(f"{source}: {percent:.1f}%")
-    
-        text_content = "\n".join(text_lines)
-    
-        # Display text inside subplot
-        ax.text(0.5, 0.5, text_content, ha="center", va="center",
-                fontsize=12, transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.5))
-    
-        ax.axis("off")  # Hide axes
-    
-    def plot(self):
+    def plot_1(self):
         """Generate the combined plot."""
         fig = plt.figure(figsize=(16, 10))
         gs = gridspec.GridSpec(2, 3, width_ratios=[1, 2, 0.05], height_ratios=[1, 1])
@@ -167,12 +59,12 @@ class GeoMagPlotter:
         ax_colorbar = fig.add_subplot(gs[0, 2])
     
         # Filtered data
-        df_geo = self.geo_filter()
-        df_mag = self.mag_filter()
+#        df_geo = self.geo_filter()
+#        df_mag = self.mag_filter()
     
-        plot_map(ax_map, df_geo, self.region)
-        self.img = plot_dist_vs_lon(ax_dist_time, df_mag, self.altitude)
-        plot_spot_count(ax_spot, df_mag, self.altitude)
+        plot_map(ax_map, self.df, self.region)
+        self.img = plot_dist_vs_lon(ax_dist_time, self.df, self.altitude)
+        plot_spot_count(ax_spot, self.df, self.altitude)
         plot_text_box(ax_text, self.df)
     
         if self.img is not None:
@@ -186,11 +78,35 @@ class GeoMagPlotter:
         plt.close()
         print(f"Plot saved to {output_file}")
 
+    def plot_2(self):
+        """Generate the combined plot."""
+        fig = plt.figure(figsize=(5, 10))
+        gs = gridspec.GridSpec(2, 1, width_ratios=[1], height_ratios=[1, 1])
+    
+        ax_globe = fig.add_subplot(gs[0, 0], projection=ccrs.Orthographic(central_longitude=-60, central_latitude=0))
+        ax_map_geomag = fig.add_subplot(gs[1, 0])
+    
+        # Filtered data
+#        df_geo = self.geo_filter()
+#        df_mag = self.mag_filter()
+
+        fig.suptitle(f"{self.date_str}", fontsize=16)
+        
+        plot_globe(ax_globe, self.df, self.region, self.date_str)
+        plot_map_geomag(ax_map_geomag, self.df, self.region, self.altitude, self.date_str)
+    
+        plt.subplots_adjust(wspace=0.3, hspace=0.3)
+        os.makedirs(self.output_folder, exist_ok=True)
+        output_file = os.path.join(self.output_folder, f"geo_globe_plot_{self.altitude}km.png")
+        plt.savefig(output_file, facecolor="white")
+        plt.close()
+        print(f"Plot saved to {output_file}")
+
 
 
 if __name__ == "__main__":
     # Example usage:
-    df = pl.read_parquet("../cache/df_gen/2017-07-01_lat-30_30_lon-100_-30_6.00MHz_15.00MHz_dist0_3000km_altitudes_100_300.parquet")
+    df = pl.read_parquet("../cache/df_gen/2017-07-01_lat-30_30_lon-100_-30_0.00MHz_30.00MHz_dist0_20000km_altitudes_100_300.parquet")
 
     region = {
         'lat_lim': [-30, 30],  
@@ -198,8 +114,8 @@ if __name__ == "__main__":
     }
     
     altitude = 300 
-     
     output_folder = "../output"
     
     plotter = GeoMagPlotter(df, region, altitude, output_folder)
-    plotter.plot()
+    plotter.plot_1()
+    plotter.plot_2()
