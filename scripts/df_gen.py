@@ -248,7 +248,7 @@ if __name__ == "__main__":
     }
 
     # Define the altitudes for conversion
-    altitudes = [100,300]  # Altitudes in km
+    altitudes = [0,100,300]  # Altitudes in km
 
     # Define the date range you want to process (e.g., a list of dates)
     date_range = ["2017-07-01"]

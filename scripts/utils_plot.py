@@ -168,16 +168,16 @@ def plot_globe(ax, df, region, date_str):
 def plot_map_geomag(ax, df_box: pl.DataFrame, region: dict, alt: float, date_str: str) -> None:
     """Plot the map heatmap of midpoints in geomagnetic coordinates."""
     latlim, lonlim = convert_geocentric_to_geomagnetic(region['lat_lim'], region['lon_lim'], alt, date_str)
-    lat_min, lat_max = latlim
-    lon_min, lon_max = lonlim
+#    lat_min, lat_max = latlim
+#    lon_min, lon_max = lonlim
 
     lats = df_box[f"geomag_lat_{alt}"].to_numpy()
     lons = df_box[f"geomag_lon_{alt}"].to_numpy()
 
-#    lat_min = min(latlim[0], lats.min())
-#    lat_max = max(latlim[1], lats.max())
-#    lon_min = min(lonlim[0], lons.min())
-#    lon_max = max(lonlim[1], lons.max())
+    lat_min = min(latlim[0], lats.min())
+    lat_max = max(latlim[1], lats.max())
+    lon_min = min(lonlim[0], lons.min())
+    lon_max = max(lonlim[1], lons.max())
 
     if len(lats) > 0:
         bins = 100
@@ -185,7 +185,7 @@ def plot_map_geomag(ax, df_box: pl.DataFrame, region: dict, alt: float, date_str
                                                  range=[[lon_min, lon_max], [lat_min, lat_max]])
 
         # Mask zeros to show them as black
-        heatmap = gaussian_filter(heatmap, sigma=2)
+        heatmap = gaussian_filter(heatmap, sigma=1)
         heatmap_masked = np.ma.masked_where(heatmap == 0, np.log1p(heatmap) * 3)
 #        heatmap_masked = np.ma.masked_where(heatmap == 0, np.log1p(heatmap))
 
@@ -203,7 +203,7 @@ def plot_map_geomag(ax, df_box: pl.DataFrame, region: dict, alt: float, date_str
 # Example usage for testing purposes:
 if __name__ == "__main__":
     # Read the DataFrame
-    df = pl.read_parquet("../cache/df_gen/2017-07-01_lat-30_30_lon-100_-30_0.00MHz_30.00MHz_dist0_20000km_altitudes_100_300.parquet")
+    df = pl.read_parquet("../cache/df_gen/2017-07-01_lat-30_30_lon-100_-30_0.00MHz_30.00MHz_dist0_20000km_altitudes_0_100_300.parquet")
 
     # Define region and altitude for plotting
     region = {
@@ -211,7 +211,7 @@ if __name__ == "__main__":
         'lon_lim': [-100, -30]  
     }
     
-    altitude = 300  # Example altitude
+    altitude = 0  # Example altitude
 
     # Create output folder if it doesn't exist
     output_folder = "../output"
