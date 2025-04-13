@@ -9,19 +9,22 @@ import apexpy
 import logging
 from pathlib import Path
 from dask.diagnostics import ProgressBar
+from utils import *
 from utils_geo import *
+from regions import REGIONS
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class HDF5PolarsLoader:
     def __init__(self, 
                  data_dir: str, 
-                 date_str: str, 
+                 sDate: datetime, 
+                 eDate: datetime, 
                  cache_dir: str = "../cache/df_gen", 
                  use_cache: bool = True, 
-                 region: tuple = None, 
-                 freq_range: tuple = None, 
-                 distance_range: tuple = None, 
+                 region_name: str = None, 
+                 freq_range: dict = None, 
+                 distance_range: dict = None, 
                  chunk_size: int = 100000, 
                  altitudes: list = None):
         """
@@ -34,15 +37,23 @@ class HDF5PolarsLoader:
         :param chunk_size: Chunk size for reading the HDF5 file.
         :param altitudes: List of altitudes to calculate geomagnetic coordinates.
         """
+
+        if region_name not in REGIONS:
+            raise ValueError(f"Region '{region_name}' is not defined.")
+        
         self.data_dir       = Path(data_dir)
-        self.date_str       = date_str
+        self.sDate          = sDate
+        self.eDate          = eDate
         self.cache_dir      = Path(cache_dir)
         self.use_cache      = use_cache
-        self.region         = region
+        self.region         = REGIONS[region_name]
         self.freq_range     = freq_range
         self.distance_range = distance_range
         self.chunk_size     = chunk_size
-        self.altitudes      = altitudes or [300, 400, 500]  # Default altitudes if not provided
+        self.altitudes      = altitudes 
+
+        # Extract datetimes
+        
 
         # Construct dynamic cache path
         if self.region:
@@ -69,76 +80,106 @@ class HDF5PolarsLoader:
         altitudes_str = '_'.join([str(alt) for alt in self.altitudes])
     
         # cache path
-        self.cache_path = self.cache_dir / f"{self.date_str}_{region_str}_{freq_str}_{distance_str}_altitudes_{altitudes_str}.parquet"
+        self.cache_path = self.cache_dir / f"{sDate}_{eDate}_{freq_str}_{distance_str}_{altitudes_str}km.parquet"
         self.df = None
         self.log = logging.getLogger(__name__)
     
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
 
-    def get_file_path(self):
+    def get_file_path(self, date_str):
         """Construct the file path based on the date string."""
-        file_name = f"rsd{self.date_str}.01.hdf5"
+        file_name = f"rsd{date_str}.01.hdf5"
         return self.data_dir / file_name
 
     def load_data(self):
+        """Split, load, and concat hdf5 files in required range of dates."""
+        datetime_split = split_datetime_range_by_day(self.sDate, self.eDate)
+        all_dfs = []
+        for sDate, eDate, date_str in datetime_split:
+            print(sDate, "->", eDate)
+            print(date_str)
+
+            file_name = f"rsd{date_str}.01.hdf5"
+            file_path = self.data_dir / file_name
+            self.log.info(f"Loading data from HDF5 file {file_path}...")        
+
+            try:
+                # Load only the required columns from the HDF5 file
+                dask_df = dd.read_hdf(file_path, key="Data/Table Layout", chunksize=self.chunk_size)
+            except (FileNotFoundError, OSError) as e:
+                self.log.warning(f"Could not load file: {file_path} - Skipping. ({e})")
+                continue
+    
+            required_columns = [
+                'year', 'month', 'day', 'hour', 'min', 'sec',
+                'pthlen', 'rxlat', 'rxlon', 'txlat', 'txlon',
+                'tfreq', 'latcen', 'loncen', 'ssrc'
+            ]
+            
+            dask_df = dask_df[required_columns]
+            print(dask_df.dtypes)
+            # Downcast columns to lower precision where appropriate
+            dask_df = dask_df.astype({
+                'rxlat': 'float32',  # Downcast latitude to float32
+                'rxlon': 'float32',  # Downcast longitude to float32
+                'txlat': 'float32',  # Downcast latitude to float32
+                'txlon': 'float32',  # Downcast longitude to float32
+                'latcen': 'float32',
+                'loncen': 'float32',
+                'ssrc': 'category',
+                'tfreq': 'float32',  # Downcast frequency to float32
+                'pthlen': 'int32',    # Downcast distance to int32 (as you're only interested in distances under 8000 km)
+                'year': 'int16',
+                'month': 'int8',
+                'day': 'int8',
+                'hour': 'int8',
+                'min': 'int8',
+                'sec': 'int8'
+            })
+            
+            # Apply filters to the data (if any) before proceeding with the rest of the steps
+            if sDate and eDate:
+                dask_df = dask_df.map_partitions(self.apply_datetime_filter, sDate, eDate)
+            if self.region:
+                dask_df = dask_df.map_partitions(self.apply_region_filter)
+            if self.freq_range:
+                dask_df = dask_df.map_partitions(self.apply_freq_filter)
+            if self.distance_range:
+                dask_df = dask_df.map_partitions(self.apply_distance_filter)
+            
+            # Continue processing and converting to pandas (or directly to Polars)
+            with ProgressBar():
+                df = dask_df.compute()
+                all_dfs.append(df)
+                
+        if all_dfs:
+            final_df = pd.concat(all_dfs, ignore_index=True)
+        else:
+            final_df = pd.DataFrame()
+    
+        return final_df
+
+    def process_data(self):
         """Load the dataset from cache or process the HDF5 file using Dask and convert to polars df."""
         if self.use_cache and self.cache_path.exists():
-            self.log.info(f"Loading data from cache for {self.date_str}...")
+            self.log.info(f"Loading data from cache for {self.sDate} - {self.eDate}...")
             self.df = pl.read_parquet(self.cache_path)
             return self.df
 
-        file_path = self.get_file_path()
-        self.log.info(f"Loading data from HDF5 file {file_path}...")        
-        
-        # Load only the required columns from the HDF5 file
-        dask_df = dd.read_hdf(file_path, key="Data/Table Layout", chunksize=self.chunk_size)
-
-        required_columns = ['year', 
-                            'month', 
-                            'day', 
-                            'hour', 
-                            'min', 
-                            'sec', 
-                            'pthlen', 
-                            'rxlat', 
-                            'rxlon', 
-                            'txlat', 
-                            'txlon', 
-                            'tfreq', 
-                            'latcen', 
-                            'loncen', 
-                            'ssrc']
-        
-        dask_df = dask_df[required_columns]
-        
-        # Downcast columns to lower precision where appropriate
-        dask_df = dask_df.astype({
-            'rxlat': 'float32',  # Downcast latitude to float32
-            'rxlon': 'float32',  # Downcast longitude to float32
-            'txlat': 'float32',  # Downcast latitude to float32
-            'txlon': 'float32',  # Downcast longitude to float32
-            'latcen': 'float32',
-            'loncen': 'float32',
-            'ssrc': 'category',
-            'tfreq': 'float32',  # Downcast frequency to float32
-            'pthlen': 'int32'    # Downcast distance to int32 (as you're only interested in distances under 8000 km)
-        })
-        
-        # Apply filters to the data (if any) before proceeding with the rest of the steps
-        if self.region:
-            dask_df = dask_df.map_partitions(self.apply_region_filter)
-        if self.freq_range:
-            dask_df = dask_df.map_partitions(self.apply_freq_filter)
-        if self.distance_range:
-            dask_df = dask_df.map_partitions(self.apply_distance_filter)
-        
-        # Continue processing and converting to pandas (or directly to Polars)
-        with ProgressBar():
-            df = dask_df.compute()
+        df = self.load_data()
         
         # Renaming and processing the dataframe as before
-        df['occurred'] = pd.to_datetime(df['year'] + '-' + df['month'] + '-' + df['day'] + ' ' + df['hour'] + ':' + df['min'] + ':' + df['sec'])
+#        df['occurred'] = pd.to_datetime(df['year'] + '-' + df['month'] + '-' + df['day'] + ' ' + df['hour'] + ':' + df['min'] + ':' + df['sec'])
+#        df.drop(['year', 'month', 'day', 'hour', 'min', 'sec'], axis=1, inplace=True)
+        df['occurred'] = pd.to_datetime({
+            'year': df['year'],
+            'month': df['month'],
+            'day': df['day'],
+            'hour': df['hour'],
+            'minute': df['min'],
+            'second': df['sec'],
+        })
         df.drop(['year', 'month', 'day', 'hour', 'min', 'sec'], axis=1, inplace=True)
         
         df = df.rename(columns={"occurred": "date",
@@ -161,13 +202,43 @@ class HDF5PolarsLoader:
         df_polars = pl.from_pandas(df)
         
         # Apply geomagnetic conversion
-        df_polars = add_geomagnetic_columns(df_polars, date_str=self.date_str, altitudes=self.altitudes)
+        df_polars = add_geomagnetic_columns(df_polars, altitudes=self.altitudes)
         
         # Save to cache
         df_polars.write_parquet(self.cache_path, compression='snappy')
         self.df = df_polars
         return self.df
 
+    def apply_datetime_filter(self, df, sDate, eDate):
+        """Apply the datetime filter to the Dask DataFrame based on start and end datetime."""
+        if sDate and eDate:
+            # Split start datetime
+            sy, smo, sd, sh, smin, ssec = (self.sDate.year, self.sDate.month, self.sDate.day,
+                                           self.sDate.hour, self.sDate.minute, self.sDate.second)
+            # Split end datetime
+            ey, emo, ed, eh, emin, esec = (self.eDate.year, self.eDate.month, self.eDate.day,
+                                           self.eDate.hour, self.eDate.minute, self.eDate.second)
+    
+            # Apply the datetime filter
+            df = df[
+                (
+                    (df['year'] > sy) |
+                    ((df['year'] == sy) & (df['month'] > smo)) |
+                    ((df['year'] == sy) & (df['month'] == smo) & (df['day'] > sd)) |
+                    ((df['year'] == sy) & (df['month'] == smo) & (df['day'] == sd) & (df['hour'] > sh)) |
+                    ((df['year'] == sy) & (df['month'] == smo) & (df['day'] == sd) & (df['hour'] == sh) & (df['min'] > smin)) |
+                    ((df['year'] == sy) & (df['month'] == smo) & (df['day'] == sd) & (df['hour'] == sh) & (df['min'] == smin) & (df['sec'] >= ssec))
+                ) &
+                (
+                    (df['year'] < ey) |
+                    ((df['year'] == ey) & (df['month'] < emo)) |
+                    ((df['year'] == ey) & (df['month'] == emo) & (df['day'] < ed)) |
+                    ((df['year'] == ey) & (df['month'] == emo) & (df['day'] == ed) & (df['hour'] < eh)) |
+                    ((df['year'] == ey) & (df['month'] == emo) & (df['day'] == ed) & (df['hour'] == eh) & (df['min'] < emin)) |
+                    ((df['year'] == ey) & (df['month'] == emo) & (df['day'] == ed) & (df['hour'] == eh) & (df['min'] == emin) & (df['sec'] <= esec))
+                )]
+        return df
+    
     def apply_region_filter(self, df):
         """Apply the region filter to the Dask DataFrame using the midpoint lat/lon columns."""
         if self.region:
@@ -210,14 +281,14 @@ class HDF5PolarsLoader:
     def get_dataframe(self):
         """Return the loaded Polars DataFrame."""
         if self.df is None:
-            self.load_data()
+            self.process_data()
         return self.df
 
     def clear_cache(self):
         """Delete all files in the cache directory."""
         if self.cache_dir.exists() and self.cache_dir.is_dir():
             for cache_file in self.cache_dir.iterdir():
-                if cache_file.is_file() and cache_file.name.startswith(f"{self.date_str}_"):
+                if cache_file.is_file() and cache_file.name.startswith(f"{self.sDate}_{self.eDate}_"):
                     cache_file.unlink()
                     self.log.info(f"Cache file removed: {cache_file}")
         else:
@@ -226,20 +297,10 @@ class HDF5PolarsLoader:
 
 if __name__ == "__main__":
     
-    # Example region and frequency range definitions
-    region = {
-        'lat_lim': [-30, 30],  # Latitude range: 30ºN to 30ºS
-        'lon_lim': [-100, -30]  # Longitude range: 30ºW to 100ºW
-    }
-
-#    region = {
-#    'lat_lim': [-90, 90],  # Latitude range: -90º (South Pole) to 90º (North Pole)
-#    'lon_lim': [-180, 180]  # Longitude range: 180ºW to 180ºE (entire globe)
-#    }
     
     freq_range = {
-        'min_freq': 0,  # Example minimum frequency (0 MHz)
-        'max_freq': 30000000  # Example maximum frequency (30 MHz)
+        'min_freq': 6000000,  # Example minimum frequency (0 MHz)
+        'max_freq': 8000000  # Example maximum frequency (30 MHz)
     }
 
     distance_range = {
@@ -251,24 +312,26 @@ if __name__ == "__main__":
     altitudes = [0,100,300]  # Altitudes in km
 
     # Define the date range you want to process (e.g., a list of dates)
-    date_range = ["2017-07-01"]
+    sDate = datetime(2017, 7, 1, 12, 0, 0)
+    eDate = datetime(2017, 7, 1, 23, 59, 59)
 
-    # Process each date
-    for date_str in date_range:
-        loader = HDF5PolarsLoader(
-            data_dir="../data/madrigal", 
-            date_str=date_str, 
-            region=region, 
-            freq_range=freq_range,
-            distance_range=distance_range,
-            altitudes=altitudes,  # Altitudes passed here
-            use_cache=True
-        )
+    region = 'Equatorial America'
 
-        # Clear cache and load the dataframe (it will use the cache if available and `use_cache=True`)
-        loader.clear_cache()  # Clear cache first
-        df = loader.get_dataframe()  # Load the data
+    loader = HDF5PolarsLoader(
+        data_dir="../data/madrigal", 
+        sDate=sDate,
+        eDate=eDate,
+        region_name=region, 
+        freq_range=freq_range,
+        distance_range=distance_range,
+        altitudes=altitudes,  # Altitudes passed here
+        use_cache=True
+    )
 
-        # Print the processed data
-        print(f"Processed data for {date_str}:")
-        print(df)
+    # Clear cache and load the dataframe (it will use the cache if available and `use_cache=True`)
+    loader.clear_cache()  # Clear cache first
+    df = loader.get_dataframe()  # Load the data
+
+    # Print the processed data
+    print(f"Processed data for {sDate} - {eDate}:")
+    print(df)

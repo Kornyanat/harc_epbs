@@ -4,10 +4,13 @@ import polars as pl
 from datetime import datetime
 import apexpy
 
-def add_geomagnetic_columns(df: pl.DataFrame, date_str: str, altitudes: list) -> pl.DataFrame:
+def add_geomagnetic_columns(df: pl.DataFrame, altitudes: list) -> pl.DataFrame:
     # Convert 'mid_lat' and 'mid_long' to lists
     geocen_lats = df['mid_lat'].to_list()
     geocen_lons = df['mid_long'].to_list()
+
+    ### Placeholder!!!! get datetime from first row
+    date_str = df.select(pl.col("date").cast(str)).to_series()[0][:10]
 
     # Prepare to store results for each altitude
     for alt in altitudes:
@@ -49,22 +52,3 @@ def convert_geomagnetic_to_geocentric(geomag_lats: list, geomag_lons: list, alt:
     geocen_lat, geocen_lon = apex_out.convert(geomag_lats, geomag_lons, 'apex', 'geo', height=alt)
 
     return geocen_lat, geocen_lon
-
-def calculate_source_percent(df: pl.DataFrame) -> dict:
-    """Calculate the percentage of each data source in the given Polars DataFrame."""
-    if df.is_empty():
-        return {}
-
-    # Convert 'source' column to string and count occurrences
-    source_counts = df["source"].cast(str).value_counts().to_pandas()
-
-    # Convert to dictionary
-    source_counts_dict = dict(zip(source_counts["source"], source_counts["count"]))
-
-    total_count = sum(source_counts_dict.values())
-
-    # Compute percentages
-    return {
-        key: (value / total_count) * 100 if total_count > 0 else 0
-        for key, value in source_counts_dict.items()
-    }

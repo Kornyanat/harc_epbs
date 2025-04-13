@@ -106,7 +106,7 @@ class GeoMagPlotter:
 
 if __name__ == "__main__":
     # Example usage:
-    df = pl.read_parquet("../cache/df_gen/2017-07-01_lat-30_30_lon-100_-30_0.00MHz_30.00MHz_dist0_20000km_altitudes_0_100_300.parquet")
+    df = pl.read_parquet("../cache/df_gen/2017-07-01_lat-30_30_lon-100_-30_6.00MHz_8.00MHz_dist0_20000km_altitudes_0_100_300.parquet")
 
     region = {
         'lat_lim': [-30, 30],  
