@@ -9,9 +9,9 @@ import apexpy
 import logging
 from pathlib import Path
 from dask.diagnostics import ProgressBar
-from utils import *
-from utils_geo import *
-from regions import REGIONS
+from scripts.utils import *
+from scripts.utils_geo import *
+from scripts.regions import REGIONS
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -76,8 +76,9 @@ class HDF5PolarsLoader:
             distance_str = f"dist{min_dist}_{max_dist}km"
         else:
             distance_str = "full_distance_range"
-    
-        altitudes_str = '_'.join([str(alt) for alt in self.altitudes])
+            
+        altitudes = self.altitudes if isinstance(self.altitudes, (list, tuple)) else [self.altitudes]
+        altitudes_str = '_'.join(str(alt) for alt in altitudes)
     
         # cache path
         self.cache_path = self.cache_dir / f"{sDate}_{eDate}_{freq_str}_{distance_str}_{altitudes_str}km.parquet"

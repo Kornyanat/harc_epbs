@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import polars as pl
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, date
+from pysolar.solar import get_altitude
+from typing import List, Dict
 
 def split_datetime_range_by_day(start_dt: datetime, end_dt: datetime) -> list[tuple[datetime, datetime, str]]:
     """Split a datetime range into daily chunks with start and end datetimes."""
@@ -40,3 +42,44 @@ def calculate_source_percent(df: pl.DataFrame) -> dict:
         key: (value / total_count) * 100 if total_count > 0 else 0
         for key, value in source_counts_dict.items()
     }
+
+def compute_sza(dt: datetime, lat: float, lon: float) -> float:
+    """Solar zenith angle in degrees (90 - solar altitude)."""
+    dt = dt.replace(tzinfo=timezone.utc)
+    return 90 - get_altitude(lat, lon, dt)
+
+def get_sunset_datetime(
+    day: date,
+    lat: float,
+    lon: float,
+    altitude_km: int = 100) -> datetime:
+    """
+    Return sunset datetime (when SZA > 100°) for a given day and location.
+    """
+    start_dt = datetime(day.year, day.month, day.day, 10, 0, 0, tzinfo=timezone.utc)
+    end_dt = datetime(day.year, day.month, day.day, 23, 59, 59, tzinfo=timezone.utc)
+
+    dt = start_dt
+    step = timedelta(minutes=1)
+
+    while dt <= end_dt:
+        sza = compute_sza(dt, lat, lon)
+        if sza > 100:
+            return dt
+        dt += step
+
+    raise ValueError(f"Sunset (SZA > 100°) not found on {day} at {lat}, {lon}")
+
+def get_sunset_time_steps(
+    day: date,
+    region: Dict,
+    altitude_km: int = 100) -> List[datetime]:
+    """
+    Get 7 time steps: from 2 hours before to 5 hours after sunset (1-hour intervals).
+    """
+    lat_center = sum(region['lat_lim']) / 2
+    lon_center = sum(region['lon_lim']) / 2
+
+    sunset = get_sunset_datetime(day, lat_center, lon_center, altitude_km)
+
+    return [sunset + timedelta(hours=h) for h in range(-2, 6)]
