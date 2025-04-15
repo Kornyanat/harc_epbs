@@ -98,11 +98,9 @@ class HDF5PolarsLoader:
         datetime_split = split_datetime_range_by_day(self.sDate, self.eDate)
         all_dfs = []
         for sDate, eDate, date_str in datetime_split:
-            print(sDate, "->", eDate)
-            print(date_str)
-
             file_name = f"rsd{date_str}.01.hdf5"
             file_path = self.data_dir / file_name
+            self.log.info(f"Loading data from {sDate} - {eDate}...") 
             self.log.info(f"Loading data from HDF5 file {file_path}...")        
 
             try:
@@ -119,7 +117,7 @@ class HDF5PolarsLoader:
             ]
             
             dask_df = dask_df[required_columns]
-            print(dask_df.dtypes)
+            
             # Downcast columns to lower precision where appropriate
             dask_df = dask_df.astype({
                 'rxlat': 'float32',  # Downcast latitude to float32
@@ -158,7 +156,8 @@ class HDF5PolarsLoader:
             final_df = pd.concat(all_dfs, ignore_index=True)
         else:
             final_df = pd.DataFrame()
-    
+
+        self.log.info(f"Loaded and merged data from {self.sDate} - {self.eDate}...") 
         return final_df
 
     def process_data(self):
@@ -313,13 +312,13 @@ if __name__ == "__main__":
     altitudes = [0,100,300]  # Altitudes in km
 
     # Define the date range you want to process (e.g., a list of dates)
-    sDate = datetime(2017, 7, 1, 12, 0, 0)
-    eDate = datetime(2017, 7, 1, 23, 59, 59)
+    sDate = datetime(2017, 7, 1, 21, 8, 0)
+    eDate = datetime(2017, 7, 2, 4, 8, 0)
 
     region = 'Equatorial America'
 
     loader = HDF5PolarsLoader(
-        data_dir="../data/madrigal", 
+        data_dir="data/madrigal", 
         sDate=sDate,
         eDate=eDate,
         region_name=region, 
@@ -334,5 +333,5 @@ if __name__ == "__main__":
     df = loader.get_dataframe()  # Load the data
 
     # Print the processed data
-    print(f"Processed data for {sDate} - {eDate}:")
+    print(f"Finished df_gen test run for {sDate} - {eDate}:")
     print(df)

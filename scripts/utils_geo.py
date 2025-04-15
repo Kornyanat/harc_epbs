@@ -5,6 +5,8 @@ from datetime import datetime
 import apexpy
 
 def add_geomagnetic_columns(df: pl.DataFrame, altitudes: list) -> pl.DataFrame:
+    if isinstance(altitudes, int):
+        altitudes = [altitudes]
     # Convert 'mid_lat' and 'mid_long' to lists
     geocen_lats = df['mid_lat'].to_list()
     geocen_lons = df['mid_long'].to_list()

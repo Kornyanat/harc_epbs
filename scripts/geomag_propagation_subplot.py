@@ -10,8 +10,8 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import os
 from scipy.ndimage import gaussian_filter
-from utils_geo import *
-from utils_plot import *
+from scripts.utils_geo import *
+from scripts.utils_plot import *
 
 class GeoMagPlotter:
     def __init__(self, 
@@ -24,6 +24,8 @@ class GeoMagPlotter:
         self.region        = region
         self.altitude      = altitude
         self.output_folder = output_folder
+        self.sDate         = self.df['date'].min()
+        self.eDate         = self.df['date'].max()
         self.date_str      = self.df['date'].dt.strftime('%Y-%m-%d')[0]
 
 #    def geo_filter(self):
@@ -57,7 +59,8 @@ class GeoMagPlotter:
         ax_spot = fig.add_subplot(gs[1, 1])
         ax_text = fig.add_subplot(gs[0, 0])
         ax_colorbar = fig.add_subplot(gs[0, 2])
-    
+
+        fig.suptitle(f"{self.sDate} - {self.eDate}", fontsize=16)
         # Filtered data
 #        df_geo = self.geo_filter()
 #        df_mag = self.mag_filter()
@@ -73,7 +76,7 @@ class GeoMagPlotter:
     
         plt.subplots_adjust(wspace=0.3, hspace=0.3)
         os.makedirs(self.output_folder, exist_ok=True)
-        output_file = os.path.join(self.output_folder, f"geo_plot_{self.altitude}km.png")
+        output_file = os.path.join(self.output_folder, f"geo_plot_{self.sDate} - {self.eDate}_{self.altitude}km.png")
         plt.savefig(output_file, facecolor="white")
         plt.close()
         print(f"Plot saved to {output_file}")
@@ -90,14 +93,14 @@ class GeoMagPlotter:
 #        df_geo = self.geo_filter()
 #        df_mag = self.mag_filter()
 
-        fig.suptitle(f"{self.date_str}", fontsize=16)
+        fig.suptitle(f"{self.sDate} - {self.eDate}", fontsize=16)
         
         plot_globe(ax_globe, self.df, self.region, self.date_str)
         plot_map_geomag(ax_map_geomag, self.df, self.region, self.altitude, self.date_str)
     
         plt.subplots_adjust(wspace=0.3, hspace=0.3)
         os.makedirs(self.output_folder, exist_ok=True)
-        output_file = os.path.join(self.output_folder, f"geo_globe_plot_{self.altitude}km.png")
+        output_file = os.path.join(self.output_folder, f"geo_globe_plot_{self.sDate} - {self.eDate}_{self.altitude}km.png")
         plt.savefig(output_file, facecolor="white")
         plt.close()
         print(f"Plot saved to {output_file}")

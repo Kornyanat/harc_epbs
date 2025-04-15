@@ -12,7 +12,8 @@ from matplotlib import cm
 from scipy.ndimage import gaussian_filter
 import numpy as np
 import os
-from utils_geo import *
+from scripts.utils_geo import *
+from scripts.utils import *
 from matplotlib.patches import Polygon
 
 
