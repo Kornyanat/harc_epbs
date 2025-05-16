@@ -2,7 +2,7 @@
 
 **HamSCI Amateur Radio Communications (HARC) for Equatorial Plasma Bubbles Study**
 
-This project develops tools for detecting and analyzing Equatorial Plasma Bubbles (EPBs) and its related wave structures using HamSCI Amateur Radio data and other space weather dataset. It builds upon earlier work initially coded by a student, Diego Sanchez, under my guidance on EPBs-related part, and is now being actively developed for more complete implementation and research integration by myself.
+This project develops tools for detecting and analyzing Equatorial Plasma Bubbles (EPBs) and its related wave structures using HamSCI amateur radio data and other space weather datasets. It builds upon earlier work initially coded by a student, Diego Sanchez, under my guidance on EPBs-related part, and is now being actively developed for more complete implementation and research integration by myself.
 
 ## Purpose
 
