@@ -19,8 +19,8 @@ This project develops tools for detecting and analyzing Equatorial Plasma Bubble
 
 ## License
 
-MIT License ― see `LICENSE` for full terms.  
-You’re welcome to reuse, modify, or build on this code with attribution.
+MIT License: See `LICENSE` for full terms.  
+You are welcome to reuse, modify, or build on this code with attribution.
 
 ## Repository
 
